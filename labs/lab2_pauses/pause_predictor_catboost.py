@@ -24,6 +24,9 @@
 
 Разбор ошибок и важности признаков -- в `analyze_results.py`.
 """
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from catboost import CatBoostClassifier, CatBoostRegressor
@@ -36,7 +39,12 @@ from features import (
     extract_sentence,
     load_features,
 )
+from paths import LAB_DATA_DIR
 from pause_predictor import PausePredictor, calc_metrics
+
+CLF_PATH = Path(LAB_DATA_DIR) / 'pause_clf.cbm'
+REG_PATH = Path(LAB_DATA_DIR) / 'pause_reg.cbm'
+VOCAB_PATH = Path(LAB_DATA_DIR) / 'pause_word_vocab.json'
 
 # Классы пунктуации с P(пауза) >= ~0.9 по данным EDA; "closing" (~0.75) и
 # "semicolon" (единичные примеры) намеренно не форсируются -- недостаточно
@@ -89,6 +97,30 @@ class PausePredictorCatboost(PausePredictor):
         self.reg.fit(X[with_pause], train_df.pause_duration.values[with_pause])
         return self
 
+    def save(self, clf_path=CLF_PATH, reg_path=REG_PATH, vocab_path=VOCAB_PATH) -> None:
+        """Сохраняет обе модели и словарь слов -- для инференса без переобучения."""
+        if self.word_vocab is None:
+            raise RuntimeError('Сначала вызовите fit().')
+        self.clf.save_model(str(clf_path))
+        self.reg.save_model(str(reg_path))
+        Path(vocab_path).write_text(
+            json.dumps(sorted(self.word_vocab), ensure_ascii=False), encoding='utf-8')
+        print(f'Сохранено: {clf_path}, {reg_path}, {vocab_path}')
+
+    @classmethod
+    def load(cls, clf_path=CLF_PATH, reg_path=REG_PATH, vocab_path=VOCAB_PATH,
+             verbose: bool | int = False) -> 'PausePredictorCatboost':
+        """Загружает сохранённые `fit()` артефакты."""
+        missing = [p for p in (clf_path, reg_path, vocab_path) if not Path(p).is_file()]
+        if missing:
+            raise FileNotFoundError(f'Нет артефактов предиктора пауз: {missing}. '
+                                    'Запустите labs/lab5_service/fit_pause_model.py')
+        model = cls(verbose=verbose)
+        model.clf.load_model(str(clf_path))
+        model.reg.load_model(str(reg_path))
+        model.word_vocab = frozenset(json.loads(Path(vocab_path).read_text(encoding='utf-8')))
+        return model
+
     def predict_batch(self, feats: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
         """Предсказание по фрейму с колонками `ALL_FEATURES` (без вызовов Natasha).
 
@@ -134,3 +166,5 @@ if __name__ == '__main__':
     for name, part in [('train', train_df), ('test', test_df)]:
         print(f'\n-- {name} --')
         calc_metrics(predict_on(pp, part))
+
+    pp.save()

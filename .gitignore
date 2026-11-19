@@ -6,6 +6,10 @@ data/*
 *.tfevents.*
 catboost_info/
 
+# артефакты предиктора пауз: пересобираются fit_pause_model.py
+labs/lab2_pauses/data/pause_*.cbm
+labs/lab2_pauses/data/pause_word_vocab.json
+
 # окружение
 .venv/
 __pycache__/
